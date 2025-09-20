@@ -789,13 +789,33 @@ fi
 # Install nginx if not already installed
 if ! command -v nginx &> /dev/null; then
     print_step "Installing Nginx..."
-    if execute_command "Nginx installation" "apt install -y nginx" false false; then
-        NGINX_VERSION=$(nginx -v 2>&1 | cut -d' ' -f3 2>/dev/null || echo "unknown")
-        print_status "Nginx $NGINX_VERSION installed"
-        log_to_file "Nginx $NGINX_VERSION installed successfully"
+    
+    # Add timeout and better error handling for nginx installation
+    print_debug "Setting up nginx repository and installing..."
+    if execute_command "Nginx installation" "timeout 300 apt install -y nginx" false false; then
+        # Verify nginx was actually installed
+        if command -v nginx &> /dev/null; then
+            NGINX_VERSION=$(nginx -v 2>&1 | cut -d' ' -f3 2>/dev/null || echo "unknown")
+            print_status "Nginx $NGINX_VERSION installed successfully"
+            log_to_file "Nginx $NGINX_VERSION installed successfully"
+            
+            # Start nginx service immediately to avoid issues later
+            if execute_command "Start Nginx service" "systemctl start nginx" true false; then
+                print_debug "Nginx service started successfully"
+            else
+                print_warning "Failed to start Nginx service, will try again later"
+            fi
+        else
+            print_error "Nginx installation completed but nginx command not found"
+            exit 1
+        fi
     else
-        print_error "Failed to install Nginx"
+        print_error "Failed to install Nginx (installation timed out or failed)"
         print_error "This is critical for serving your application"
+        print_error "Common causes:"
+        print_error "- Network connectivity issues"
+        print_error "- Package repository problems"
+        print_error "- Insufficient disk space"
         exit 1
     fi
 else
@@ -806,7 +826,26 @@ else
     # Verify Nginx configuration is valid
     if ! nginx -t >/dev/null 2>&1; then
         print_warning "Existing Nginx configuration has issues"
-        print_warning "This might cause deployment problems"
+        print_warning "Attempting to backup and fix configuration..."
+        
+        # Backup existing config and try to fix
+        cp /etc/nginx/nginx.conf "/etc/nginx/nginx.conf.backup.$(date +%s)" 2>/dev/null || true
+        
+        # Remove potentially problematic site configs
+        rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
+        
+        # Test again
+        if nginx -t >/dev/null 2>&1; then
+            print_info "Nginx configuration fixed"
+        else
+            print_warning "Nginx configuration still has issues - will continue anyway"
+        fi
+    fi
+    
+    # Ensure nginx is running
+    if ! systemctl is-active nginx >/dev/null 2>&1; then
+        print_debug "Starting existing Nginx service..."
+        systemctl start nginx >/dev/null 2>&1 || true
     fi
 fi
 
@@ -919,7 +958,7 @@ if [ -n "$BUILD_COMMAND" ]; then
     print_step "Building application..."
     
     # Check available disk space before building
-    local available_space=$(df . | awk 'NR==2 {print $4}')
+    available_space=$(df . | awk 'NR==2 {print $4}')
     if [ "$available_space" -lt 1048576 ]; then  # Less than 1GB
         print_warning "Low disk space available ($(df -h . | awk 'NR==2 {print $4}'))"
         print_warning "Build might fail due to insufficient space"
@@ -937,7 +976,7 @@ if [ -n "$BUILD_COMMAND" ]; then
                 log_to_file "Build directory: $BUILD_DIR, Size: $BUILD_SIZE"
                 
                 # Check if build directory has content
-                local build_files=$(find "$BUILD_DIR" -type f | wc -l)
+                build_files=$(find "$BUILD_DIR" -type f | wc -l)
                 if [ "$build_files" -eq 0 ]; then
                     print_warning "Build directory is empty - this might indicate a build issue"
                 fi
@@ -1235,12 +1274,17 @@ fi
 # Test and restart nginx
 print_step "Testing and restarting Nginx..."
 
-# Test nginx configuration
-if execute_command "Nginx configuration test" "nginx -t" false false; then
+# Test nginx configuration with timeout
+if execute_command "Nginx configuration test" "timeout 30 nginx -t" false false; then
     print_debug "Nginx configuration test passed"
     
-    # Restart nginx service
-    if execute_command "Nginx service restart" "systemctl restart nginx" false false; then
+    # Stop nginx first to ensure clean restart
+    print_debug "Stopping Nginx service for clean restart..."
+    execute_command "Stop Nginx service" "systemctl stop nginx" true false
+    sleep 2
+    
+    # Restart nginx service with timeout
+    if execute_command "Nginx service restart" "timeout 60 systemctl start nginx" false false; then
         # Enable nginx on boot
         if execute_command "Enable Nginx on boot" "systemctl enable nginx" true false; then
             print_status "Nginx configured and restarted"
@@ -1250,30 +1294,59 @@ if execute_command "Nginx configuration test" "nginx -t" false false; then
             print_warning "Nginx will not start automatically after reboot"
         fi
         
-        # Verify Nginx is running
-        if systemctl is-active nginx >/dev/null 2>&1; then
+        # Verify Nginx is running with multiple attempts
+        nginx_started=false
+        for i in {1..5}; do
+            sleep 2
+            if systemctl is-active nginx >/dev/null 2>&1; then
+                nginx_started=true
+                break
+            fi
+            print_debug "Waiting for Nginx to start (attempt $i/5)..."
+        done
+        
+        if [ "$nginx_started" = "true" ]; then
             print_info "Nginx service is active and running"
             
-            # Test HTTP response
-            sleep 2  # Give nginx a moment to fully start
-            if curl -s -o /dev/null -w "%{http_code}" "http://localhost" | grep -q "200\|404\|403"; then
+            # Test HTTP response with timeout
+            print_debug "Testing HTTP response..."
+            sleep 3  # Give nginx more time to fully initialize
+            
+            if timeout 10 curl -s -o /dev/null -w "%{http_code}" "http://localhost" 2>/dev/null | grep -qE "200|404|403"; then
                 print_info "Nginx is responding to HTTP requests"
             else
-                print_warning "Nginx may not be responding properly to HTTP requests"
+                print_warning "Nginx may not be responding properly to HTTP requests yet"
+                print_info "This is normal - it may need a few more seconds to fully start"
             fi
         else
-            print_warning "Nginx service may not be running properly"
-            print_warning "Try: systemctl status nginx"
+            print_error "Nginx service failed to start after multiple attempts"
+            print_error "Check status: systemctl status nginx"
+            print_error "Check logs: journalctl -u nginx -n 50"
+            
+            # Try to get more information about the failure
+            systemctl status nginx --no-pager 2>/dev/null || true
+            exit 1
         fi
     else
-        print_error "Failed to restart Nginx service"
-        print_error "Check system logs: journalctl -u nginx"
+        print_error "Failed to start Nginx service"
+        print_error "Check system logs: journalctl -u nginx -n 20"
+        print_error "Check nginx error log: tail -20 /var/log/nginx/error.log"
+        
+        # Show some diagnostic information
+        print_debug "Nginx process status:"
+        ps aux | grep nginx | grep -v grep || print_debug "No nginx processes found"
         exit 1
     fi
 else
     print_error "Nginx configuration test failed!"
     print_error "Configuration file: /etc/nginx/sites-available/$APP_NAME"
-    print_error "Run 'nginx -t' for detailed error information"
+    
+    # Show the actual configuration errors
+    print_debug "Nginx configuration errors:"
+    nginx -t 2>&1 | head -10 | while read line; do
+        print_debug "$line"
+    done
+    
     log_to_file "Nginx configuration test failed"
     exit 1
 fi
@@ -1286,8 +1359,8 @@ if [ "$ENABLE_SSL" = "true" ] && [ "$DOMAIN" != "localhost" ]; then
     print_debug "Performing pre-SSL validation checks..."
     
     # Check if domain resolves to this server
-    local server_ip=$(curl -s ipinfo.io/ip 2>/dev/null || echo "unknown")
-    local domain_ip=$(dig +short "$DOMAIN" 2>/dev/null | tail -1)
+    server_ip=$(curl -s ipinfo.io/ip 2>/dev/null || echo "unknown")
+    domain_ip=$(dig +short "$DOMAIN" 2>/dev/null | tail -1)
     
     if [ "$server_ip" != "unknown" ] && [ -n "$domain_ip" ]; then
         if [ "$server_ip" = "$domain_ip" ]; then
@@ -1305,7 +1378,7 @@ if [ "$ENABLE_SSL" = "true" ] && [ "$DOMAIN" != "localhost" ]; then
         print_debug "Running certbot for domain: $DOMAIN"
         
         # Attempt SSL certificate installation
-        local ssl_command="certbot --nginx -d '$DOMAIN' --non-interactive --agree-tos --email '$EMAIL_FOR_SSL' --redirect"
+        ssl_command="certbot --nginx -d '$DOMAIN' --non-interactive --agree-tos --email '$EMAIL_FOR_SSL' --redirect"
         if execute_command "SSL certificate installation" "$ssl_command" true false; then
             print_status "SSL certificate installed successfully"
             log_to_file "SSL certificate installed for $DOMAIN"
@@ -1356,7 +1429,7 @@ if command -v ufw &> /dev/null; then
     print_step "Configuring firewall..."
     
     # Check current firewall status
-    local ufw_status=$(ufw status 2>/dev/null | head -1 | awk '{print $2}')
+    ufw_status=$(ufw status 2>/dev/null | head -1 | awk '{print $2}')
     print_debug "Current UFW status: ${ufw_status:-unknown}"
     
     # Configure firewall rules
