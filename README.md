@@ -1,113 +1,59 @@
-# Desuru - Universal JavaScript Framework Deployment
+# Desuru
 
-🚀 **One-command deployment for React, Next.js, Vue, Angular, Nuxt, Svelte, Gatsby, Node.js and more!**
+**Making deployment simple** 🚀
+
+One-command deployment for your JavaScript applications.
 
 ## Quick Start
 
-### Requirements
-- Ubuntu/Debian server with root access
-- Domain name pointing to your server (for SSL)
+Run this command from your project directory:
 
-### Basic Usage
-
-**Deploy from your project directory:**
 ```bash
-sudo curl -sSL https://your-domain.com/desuru.sh | bash -s -- --app myapp --domain example.com
-```
-
-**With SSL:**
-```bash
-sudo curl -sSL https://your-domain.com/desuru.sh | bash -s -- \
+curl -sSL https://raw.githubusercontent.com/desuruproject/desuru/refs/heads/main/desuru.sh | sudo bash -s -- \
   --app myapp \
   --domain example.com \
   --ssl \
   --email admin@example.com
 ```
 
-### Safer Alternative (Recommended)
-```bash
-# Download and review the script first
-curl -L https://your-domain.com/desuru.sh > desuru.sh
-chmod +x desuru.sh
+That's it! Your app is now live.
 
-# Review the script content, then run:
-sudo ./desuru.sh --app myapp --domain example.com --ssl --email admin@example.com
-```
+## What You Need
+
+- Ubuntu server with root access
+- Domain name pointing to your server
+- Your app's source code
 
 ## Options
 
-| Flag | Description | Example |
-|------|-------------|---------|
-| `--app` | Application name (required) | `--app myblog` |
-| `--domain` | Domain or IP (required) | `--domain myblog.com` |
-| `--port` | App port (default: 3000) | `--port 8080` |
-| `--ssl` | Enable HTTPS with Let's Encrypt | `--ssl` |
-| `--email` | Email for SSL (required with --ssl) | `--email admin@example.com` |
-| `--instances` | PM2 instances (default: 1) | `--instances max` |
-| `--memory` | Memory limit (default: 500M) | `--memory 1G` |
-
-## Examples
-
-**Frontend App (React/Vue/Angular):**
-```bash
-sudo ./desuru.sh --app frontend --domain myapp.com --ssl --email me@example.com
-```
-
-**Backend API:**
-```bash
-sudo ./desuru.sh --app api --domain api.myapp.com --port 3001 --ssl --email me@example.com
-```
-
-**High Performance:**
-```bash
-sudo ./desuru.sh --app webapp --domain myapp.com --instances max --memory 2G
-```
+| Flag | Description | Required |
+|------|-------------|----------|
+| `--app` | Your app name | ✅ |
+| `--domain` | Your domain or IP | ✅ |
+| `--ssl` | Enable HTTPS | No |
+| `--email` | Email for SSL certificate | With --ssl |
+| `--port` | App port (default: 3000) | No |
 
 ## What It Does
 
-1. ✅ Detects your JavaScript framework automatically
-2. ✅ Installs Node.js, nginx, PM2 (if needed)
-3. ✅ Builds your application
-4. ✅ Configures nginx with security headers
-5. ✅ Sets up SSL certificates (optional)
-6. ✅ Starts your app with PM2 process management
-7. ✅ Configures firewall rules
+- Automatically detects your framework (React, Node.js, etc.)
+- Installs dependencies (Node.js, nginx, PM2)
+- Builds and deploys your app
+- Sets up SSL certificates
+- Configures security and firewall
 
-## Supported Frameworks
+## Testing Status
 
-- **Frontend:** React, Vue.js, Angular, Svelte, Gatsby
-- **Fullstack:** Next.js, Nuxt.js, SvelteKit
-- **Backend:** Node.js, Express.js, any npm-based server
+✅ **Tested on:** Ubuntu with React and Node.js applications  
+🚧 **More testing:** Additional frameworks and platforms coming soon
 
-## Security Notes
+## Need Help?
 
-⚠️ **This script requires root access and executes remote code. Only use on servers you control.**
-
-- Always use HTTPS sources
-- Review script content when possible
-- Recommended for development/staging environments
-- For production, download and audit the script first
-
-## Troubleshooting
-
-**Common Issues:**
-- Ensure you're in your project root directory (where package.json is)
-- Check domain DNS points to your server
-- Verify ports 80/443 are open
-- Review deployment logs: `tail -50 /tmp/deploy-*.log`
-
-**Get Help:**
-- Check nginx status: `systemctl status nginx`
-- View app logs: `pm2 logs myapp`
-- Test nginx config: `nginx -t`
-
-## Support
-
-For issues and questions, check the deployment logs first:
+Check your deployment logs:
 ```bash
-tail -50 /tmp/deploy-$(date +%Y%m%d)*.log
+tail -50 /tmp/deploy-*.log
 ```
 
 ---
 
-**Made with ❤️ for developers who want simple deployments**
+*Making deployment simple for developers everywhere*
